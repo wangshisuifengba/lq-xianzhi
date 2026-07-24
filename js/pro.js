@@ -1,4 +1,46 @@
-ï»¿// ä¸´æåç¥ â Pro ç¶æç®¡ç + æ¯ä»
+// ä¸´æåç¥ â Pro ç¶æç®¡ç
+'use strict';
+
+const VALID_CODES = ['123456', '888888', '000000'];
+
+function isPro() {
+  return localStorage.getItem('lq_pro_unlocked') === 'true';
+}
+
+function unlockPro(code) {
+  const normalized = (code || '').trim();
+  if (VALID_CODES.includes(normalized)) {
+    localStorage.setItem('lq_pro_unlocked', 'true');
+    return true;
+  }
+  return false;
+}
+
+function checkFoodLimit() {
+  if (isPro()) return { ok: true, remaining: Infinity, limit: Infinity };
+  const count = countActiveFood();
+  const FREE_LIMIT = 50;
+  return {
+    ok: count < FREE_LIMIT,
+    remaining: Math.max(0, FREE_LIMIT - count),
+    limit: FREE_LIMIT
+  };
+}
+
+function getRemainingSlots() {
+  if (isPro()) return Infinity;
+  const count = countActiveFood();
+  return Math.max(0, 50 - count);
+}
+
+function countActiveFood() {
+  try {
+    const foods = JSON.parse(localStorage.getItem('lq_foods') || '[]');
+    return foods.filter(function(f) { return !f.archived; }).length;
+  } catch (e) {
+    return 0;
+  }
+}ï»¿// ä¸´æåç¥ â Pro ç¶æç®¡ç + æ¯ä»
 (function() {
   'use strict';
 
