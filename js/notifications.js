@@ -1,110 +1,62 @@
-// ä¸´æåç¥ â è¿ææééç¥
-(function() {
-  'use strict';
+/* æ¶å­æ¹¡éå ¢ç¡ é¥?é«æ°±ç¡é»æ°å */
 
-  async function requestPermission() {
-    if (!('Notification' in window)) {
-      return { ok: false, reason: 'æµè§å¨ä¸æ¯æéç¥' };
-    }
-    if (Notification.permission === 'granted') return { ok: true };
-    if (Notification.permission === 'denied') {
-      return { ok: false, reason: 'éç¥æéå·²è¢«æç»ï¼è¯·å¨æµè§å¨è®¾ç½®ä¸­å¼å¯' };
-    }
-    const result = await Notification.requestPermission();
-    return {
-      ok: result === 'granted',
-      reason: result === 'granted' ? null : 'ç¨æ·æªæäºæé'
-    };
+const NOTIFY_KEY = 'lq-xianzhi-notify-enabled';
+
+async function requestNotificationPermission() {
+  if (!('Notification' in window)) {
+    return 'unsupported';
   }
-
-  function getPermissionStatus() {
-    if (!('Notification' in window)) return 'unsupported';
-    return Notification.permission;
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') {
+    localStorage.setItem(NOTIFY_KEY, 'true');
+    return 'granted';
   }
+  return perm;
+}
 
-  async function checkAndNotify(items, warnDays) {
-    if (getPermissionStatus() !== 'granted') return [];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const triggered = [];
+function isNotificationEnabled() {
+  return localStorage.getItem(NOTIFY_KEY) === 'true' && Notification.permission === 'granted';
+}
 
-    for (const item of items) {
-      if (item.consumed) continue;
-      const expiry = new Date(item.expiry);
-      expiry.setHours(0, 0, 0, 0);
-      const daysLeft = Math.floor((expiry - today) / (24 * 60 * 60 * 1000));
-
-      if (daysLeft <= 0) {
-        showNotification('å·²è¿æ', 'ã' + item.name + 'ãå·²è¿æï¼è¯·å°½å¿«å¤ç', item.id, 'expired');
-        triggered.push({ item, type: 'expired', daysLeft });
-      } else if (daysLeft <= warnDays) {
-        showNotification('ä¸´ææé', 'ã' + item.name + 'ãè¿å© ' + daysLeft + ' å¤©è¿æ', item.id, 'warn');
-        triggered.push({ item, type: 'warn', daysLeft });
-      }
-    }
-    return triggered;
-  }
-
-  function showNotification(title, body, id, tag) {
-    if (getPermissionStatus() !== 'granted') return;
-    const options = {
-      body,
-      icon: './assets/icons/icon-192.png',
-      badge: './assets/icons/icon-192.png',
-      tag: tag + '-' + id,
-      requireInteraction: true
-    };
-    try {
-      const n = new Notification(title, options);
-      n.onclick = () => {
-        window.focus();
-        n.close();
-        const el = document.querySelector('[data-id="' + id + '"]');
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      };
-      setTimeout(() => n.close(), 8000);
-    } catch (e) {
-      console.warn('[Notify]', e);
-    }
-  }
-
-  async function sendToServiceWorker(items, warnDays) {
-    if (!('serviceWorker' in navigator)) return;
-    const reg = await navigator.serviceWorker.ready;
-    if (reg && reg.active) {
-      reg.active.postMessage({
-        type: 'CHECK_EXPIRY',
-        items,
-        warnDays
+function sendNotification(title, body) {
+  if (!isNotificationEnabled()) return;
+  if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    navigator.serviceWorker.ready.then(reg => {
+      reg.showNotification(title, {
+        body,
+        icon: './assets/icons/icon-192.png',
+        badge: './assets/icons/icon-192.png',
+        tag: 'food-reminder'
       });
-    }
-  }
-
-  let checkTimer = null;
-  function startScheduledCheck(getItems) {
-    stopScheduledCheck();
-    queueMicrotask(async () => {
-      const items = await getItems();
-      const warnDays = await LQDB.getSetting('warnDays', 3);
-      await checkAndNotify(items, warnDays);
     });
-    checkTimer = setInterval(async () => {
-      const items = await getItems();
-      const warnDays = await LQDB.getSetting('warnDays', 3);
-      await checkAndNotify(items, warnDays);
-    }, 60 * 60 * 1000);
+  } else {
+    new Notification(title, { body, icon: './assets/icons/icon-192.png' });
   }
+}
 
-  function stopScheduledCheck() {
-    if (checkTimer) clearInterval(checkTimer);
-    checkTimer = null;
+function checkExpiryNotifications(foods, warnDays) {
+  if (!isNotificationEnabled() || !foods.length) return;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const warnDate = new Date(today);
+  warnDate.setDate(warnDate.getDate() + warnDays);
+
+  const expiringSoon = foods.filter(f => {
+    const d = new Date(f.expiry);
+    d.setHours(0, 0, 0, 0);
+    return d <= warnDate && d >= today;
+  });
+
+  const expired = foods.filter(f => {
+    const d = new Date(f.expiry);
+    d.setHours(0, 0, 0, 0);
+    return d < today;
+  });
+
+  if (expired.length) {
+    sendNotification('æ¤ç·æ§å®¸è¶ç¹é?, `${expired.length} æµ å î¤éä½¸å¡æ©å¨æ¹¡éå²î¬éå©æ¤å¨å¯æ`);
+  } else if (expiringSoon.length) {
+    sendNotification('æ¤ç·æ§éå²ç¢æ©å¨æ¹¡', `${expiringSoon.length} æµ å î¤éä½¸æ¹ª ${warnDays} æ¾¶âå´éçæ¹¡`);
   }
-
-  window.LQNotify = {
-    requestPermission,
-    getPermissionStatus,
-    checkAndNotify,
-    startScheduledCheck,
-    stopScheduledCheck
-  };
-})();
+}
